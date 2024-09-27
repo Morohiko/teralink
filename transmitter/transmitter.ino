@@ -1,4 +1,14 @@
 #include <nmeaparser.h>
+#include <SPI.h>
+#include <LoRa.h>
+
+// LoRa pins
+#define SCK     18
+#define MISO    19
+#define MOSI    23
+#define SS      5   // NSS
+#define RST     12
+#define DIO0    14
 
 NMEAParser nmeaParser;
 
@@ -19,6 +29,16 @@ void setup() {
   Serial.println("nmeaparser");
   Serial1.begin(115200, SERIAL_8N1, GNSS_RXD, GNSS_TXD);
   
+  // Initialize LoRa
+  LoRa.setPins(SS, RST, DIO0);
+
+  if (!LoRa.begin(433E6)) { // Set frequency to 433 MHz (adjust if necessary)
+    Serial.println("Starting LoRa failed!");
+    while (1);
+  }
+
+  Serial.println("LoRa Initializing OK!");
+
   delay(1000);
 }
 
@@ -69,6 +89,10 @@ void loop() {
       to_send += ", sats_in_view: " + String(gsv.satellitesInView);
     }
     Serial.println(to_send);
+
+    LoRa.beginPacket();
+    LoRa.print(to_send);
+    LoRa.endPacket();
 
     delay(SLEEP_BETWEEN_GNSS);
   }
