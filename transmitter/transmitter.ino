@@ -14,6 +14,11 @@
 #define GNSS_RXD 7
 #define GNSS_TXD 8
 
+// buzzer pins
+#define BUZZER_PLUS 5
+#define BUZZER_GND 6
+#define BUZZER_IS_CONNECTED 3
+
 NMEAParser nmeaParser;
 
 #define BUFFER_SIZE 256
@@ -34,9 +39,7 @@ const unsigned long interval_millis = 1000u; // 1 second
 
 void setup() {
   Serial.begin(115200);
-  // while (!Serial) {
-  //   ; // Wait for Serial to be ready
-  // }
+
   Serial.println("nmeaparser");
   Serial1.begin(115200, SERIAL_8N1, GNSS_RXD, GNSS_TXD);
   
@@ -57,8 +60,15 @@ void setup() {
 
   Serial.println("LoRa Initializing OK!");
 
+  // initialize smart delay
   previousMillis = millis();
 
+  // initialize buzzer
+  pinMode(BUZZER_PLUS, OUTPUT);
+  pinMode(BUZZER_GND, OUTPUT);
+  pinMode(BUZZER_IS_CONNECTED, INPUT);
+
+  // sleep
   delay(1000);
 }
 
@@ -91,6 +101,11 @@ inline String convert_utc_time(String ggaSentence) {
 
 void loop() {
   while (Serial1.available()) {
+    int is_buzzer_connected = digitalRead(BUZZER_IS_CONNECTED);
+    // turn on buzzer
+    digitalWrite(BUZZER_PLUS, !is_buzzer_connected);
+    digitalWrite(BUZZER_GND, 0);
+
     char c = Serial1.read();
     String to_send = "";
     if (c != '\n' && c != '\r') {
