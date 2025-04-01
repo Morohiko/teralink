@@ -6,13 +6,13 @@
 #define SCK     10
 #define MISO    11
 #define MOSI    12
-#define SS      13   // NSS
+#define SS      13
 #define RST     1
 #define DIO0    2
 
 // GNSS pins
-#define GNSS_RXD 7
-#define GNSS_TXD 8
+#define GNSS_RXD 8
+#define GNSS_TXD 7
 
 // buzzer pins
 #define BUZZER_PLUS 5
@@ -32,7 +32,12 @@ struct gnss_data {
   int sats;
 };
 
-struct gnss_data last_data;
+struct gnss_data last_data = {
+  .utc = String("00:00:00"),
+  .lon = 0.0,
+  .lat = 0.0,
+  .sats = 0
+};
 
 unsigned long previousMillis = 0u;
 const unsigned long interval_millis = 1000u; // 1 second
@@ -41,6 +46,7 @@ void setup() {
   Serial.begin(115200);
 
   Serial.println("nmeaparser");
+
   Serial1.begin(115200, SERIAL_8N1, GNSS_RXD, GNSS_TXD);
   
   SPI.begin(SCK, MISO, MOSI, SS);
@@ -48,22 +54,15 @@ void setup() {
   // Initialize LoRa
   LoRa.setPins(SS, RST, DIO0);
 
-  if (!LoRa.begin(433E6)) {
+  while (!LoRa.begin(433E6)) {
     Serial.println("Starting LoRa failed!");
-    while (1);
+    delay(1000u);
   }
-
-  LoRa.setSpreadingFactor(512);
-  LoRa.setSignalBandwidth(64000);
-  LoRa.setCodingRate4(5);
-  LoRa.setTxPower(20);
 
   Serial.println("LoRa Initializing OK!");
 
-  // initialize smart delay
   previousMillis = millis();
 
-  // initialize buzzer
   pinMode(BUZZER_PLUS, OUTPUT);
   pinMode(BUZZER_GND, OUTPUT);
   pinMode(BUZZER_IS_CONNECTED, INPUT);
@@ -103,13 +102,11 @@ void loop() {
   while (Serial1.available()) {
     int is_buzzer_connected = digitalRead(BUZZER_IS_CONNECTED);
     // turn on buzzer
-    digitalWrite(BUZZER_PLUS, !is_buzzer_connected);
-    digitalWrite(BUZZER_GND, 0);
+    // digitalWrite(BUZZER_PLUS, !is_buzzer_connected);
+    // digitalWrite(BUZZER_GND, 0);
 
     char c = Serial1.read();
-    String to_send = "";
     if (c != '\n' && c != '\r') {
-      // Add character to buffer if space permits
       if (bufferIndex < (BUFFER_SIZE - 1)) {
         inputBuffer[bufferIndex++] = c;
       }
@@ -121,13 +118,12 @@ void loop() {
       continue;
     }
 
-    if (bufferIndex <= 0) 
+    if (bufferIndex <= 0)
       continue;
 
     inputBuffer[bufferIndex] = '\0';
     String sentence = String(inputBuffer);
     bufferIndex = 0;
-
     sentence.trim();
 
     // Parse the sentence
@@ -148,6 +144,7 @@ void loop() {
       GSVData gsv = nmeaParser.getGSVData();
       last_data.sats = gsv.satellitesInView;
     }
-    smart_delay();
   }
+  smart_delay();
+  delay(2000);
 }

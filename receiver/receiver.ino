@@ -1,75 +1,77 @@
 #include <SPI.h>
 #include <LoRa.h>
+#include <ESP8266WiFi.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebSrv.h>
 
-// Load Wi-Fi library
-#include <WiFi.h>
-#include <NetworkClient.h>
-#include <WiFiAP.h>
+// LORA SPI pins
+#define LORA_SCK   D5
+#define LORA_MISO  D6
+#define LORA_MOSI  D7
+#define LORA_CS    D8
+#define LORA_RST   D1
+#define LORA_DIO0  D0
 
-// LoRa pins for Arduino Nano
-#define ss 10    // NSS
-#define rst 9    // RST
-#define dio0 2   // DIO0
+#define LORA_FREQUENCY 868E6
 
 // Wifi creds
 const char* ssid     = "ESP32-Access-Point";
 const char* password = "123456789";
 
-// Wifi server port: 80
-WiFiServer server(80);
+AsyncWebServer server(80);
 
-// Consist incoming data to print
 String incomingPackages = "";
 
-void print_html(NetworkClient wifiClient) {
-  wifiClient.println("HTTP/1.1 200 OK");
-  wifiClient.println("Content-type:text/html");
-  wifiClient.println("Connection: close");
-  wifiClient.println();
+void print_html(AsyncWebServerRequest *request) {
+  String to_send = "<!DOCTYPE html><html>"
+      "<head><meta charset=\"utf-8\"><title>ESP8266 AP</title></head>"
+      "<body><h1>received:</h1></p>" +
+      incomingPackages +
+      "</body></html>";
 
-  // Display the HTML web page
-  wifiClient.println("<!DOCTYPE html> <html>");
-  wifiClient.println("<head> <title>gps tracker</title> </head>");
-  wifiClient.println("<body> <h1>gps tracker</h1>");
-  wifiClient.println(incomingPackages);
-  wifiClient.println("</body> </html>");
-  wifiClient.println();
+  AsyncWebServerResponse *response = request->beginResponse(200, "text/html",
+    to_send.c_str()
+  );
+
+  response->addHeader("Content-type", "text/html");
+  response->addHeader("Connection", "close");
+  request->send(response);
 }
 
 void setup() {
+  delay(1000);
+
   Serial.begin(115200);
-  while (!Serial);
 
   Serial.println("LoRa Receiver");
 
-  // Lora initialization
-  LoRa.setPins(ss, rst, dio0);
+  LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
 
-  if (!LoRa.begin(433E6)) {
+  while (!LoRa.begin(LORA_FREQUENCY)) {
     Serial.println("Starting LoRa failed!");
-    while (1);
   }
+  Serial.println("LoRa Initialization Successful!");
 
-  LoRa.setSpreadingFactor(512);
-  LoRa.setSignalBandwidth(64000);
-  LoRa.setCodingRate4(5);
+  LoRa.receive();
 
-  if (!WiFi.softAP(ssid, password)) {
-    Serial.print("Soft AP creation failed.");
-    while (1);
-  }
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
 
-  IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
-  Serial.println(myIP);
-  server.begin();
+  Serial.println(WiFi.softAPIP());
 
-  Serial.println("Server started");
+  server.on("/", [](AsyncWebServerRequest *request){
+    Serial.println("request");
+
+    print_html(request);
+  });
+
+  server.begin();
+  Serial.println("HTTP server started");
 }
 
 void loop() {
   int packetSize = LoRa.parsePacket();
-
   if (packetSize) {
     Serial.print("Received packet: ");
 
@@ -83,11 +85,4 @@ void loop() {
     Serial.print(" with RSSI: ");
     Serial.println(LoRa.packetRssi());
   }
-
-  NetworkClient client = server.accept();
-  if (client && client.connected()) {
-    Serial.println("client connected, print..");
-    print_html(client);
-  }
-  client.stop();
 }
