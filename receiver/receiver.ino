@@ -39,9 +39,9 @@ void print_html(AsyncWebServerRequest *request) {
 }
 
 void setup() {
-  delay(1000);
-
   Serial.begin(115200);
+
+  delay(1000);
 
   Serial.println("LoRa Receiver");
 

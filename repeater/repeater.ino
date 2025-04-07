@@ -1,6 +1,14 @@
 #include <SPI.h>
 #include <LoRa.h>
 
+// #define WITH_SERIAL
+
+#ifdef WITH_SERIAL
+#define println(str) Serial.println("rep:" + str)
+#else
+#define println(str)
+#endif
+
 #define LORA_TX_SCK   5
 #define LORA_TX_MISO  18
 #define LORA_TX_MOSI  19
@@ -13,8 +21,8 @@
 #define LORA_RX_MISO  12
 #define LORA_RX_MOSI  13
 #define LORA_RX_SS    15
-#define LORA_RX_RST   33
-#define LORA_RX_DIO0  32  
+#define LORA_RX_RST   27
+#define LORA_RX_DIO0  25  
 #define LORA_RX_FREQUENCY 433E6
 
 SPIClass spi_tx = SPIClass(VSPI);
@@ -24,9 +32,12 @@ SPIClass spi_rx = SPIClass(HSPI);
 LoRaClass lora_rx;
 
 void setup() {
+#ifdef WITH_SERIAL
   Serial.begin(115200);
+#endif
+  delay(1000);
 
-  Serial.println("LoRa Transmitter");
+  println("LoRa Repeater");
 
   spi_tx.begin(LORA_TX_SCK, LORA_TX_MISO, LORA_TX_MOSI);
   lora_tx.setSPI(spi_tx);
@@ -37,33 +48,28 @@ void setup() {
   lora_rx.setPins(LORA_RX_SS, LORA_RX_RST, LORA_RX_DIO0);
 
   while (!lora_tx.begin(LORA_TX_FREQUENCY)) {
-    Serial.println("Starting TX LoRa failed!");
+    println("Starting TX LoRa failed!");
     delay(1000);
   }
 
   while (!lora_rx.begin(LORA_RX_FREQUENCY)) {
-    Serial.println("Starting RX LoRa failed!");
+    println("Starting RX LoRa failed!");
     delay(1000);
   }
-
-  Serial.println("LoRa Initialization Successful!");
-
+  println("LoRa Initialization Successful!");
   lora_rx.receive();
 }
 
 void loop() {
   int packetSize = lora_rx.parsePacket();
   if (packetSize) {
-    Serial.println("Received packet: ");
-
+    println("Received packet: ");
     while (lora_rx.available()) {
       String received = lora_rx.readString();
-      Serial.println(received);
+      println(received);
       lora_tx.beginPacket();
       lora_tx.print(received);
       lora_tx.endPacket();
     }
-
-    Serial.println(" with RSSI: ");
   }
 }

@@ -2,6 +2,13 @@
 #include <SPI.h>
 #include <LoRa.h>
 
+// Config
+// #define WITH_BUZZER
+// #define WITH_SERIAL_LOGS
+
+#define MINIMUM_SATS_TO_SEND_LAST_GOOD 24
+#define DELAY_TO_SEND 2000u
+
 // LoRa pins
 #define SCK     10
 #define MISO    11
@@ -14,10 +21,18 @@
 #define GNSS_RXD 8
 #define GNSS_TXD 7
 
-// buzzer pins
-#define BUZZER_PLUS 5
-#define BUZZER_GND 6
-#define BUZZER_IS_CONNECTED 3
+#ifdef WITH_BUZZER
+  // buzzer pins
+  #define BUZZER_PLUS 5
+  #define BUZZER_GND 6
+  #define BUZZER_IS_CONNECTED 3
+#endif
+
+#ifdef WITH_SERIAL_LOGS
+  #define println(str) Serial.println("tx: " + str)
+#else
+  #define println(str)
+#endif
 
 NMEAParser nmeaParser;
 
@@ -39,14 +54,19 @@ struct gnss_data last_data = {
   .sats = 0
 };
 
+struct gnss_data last_good_data = {
+  .utc = String("00:00:00"),
+  .lon = 0.0,
+  .lat = 0.0,
+  .sats = 0
+};
+
 unsigned long previousMillis = 0u;
-const unsigned long interval_millis = 1000u; // 1 second
 
 void setup() {
+#ifdef WITH_SERIAL_LOGS
   Serial.begin(115200);
-
-  Serial.println("nmeaparser");
-
+#endif
   Serial1.begin(115200, SERIAL_8N1, GNSS_RXD, GNSS_TXD);
   
   SPI.begin(SCK, MISO, MOSI, SS);
@@ -55,42 +75,93 @@ void setup() {
   LoRa.setPins(SS, RST, DIO0);
 
   while (!LoRa.begin(433E6)) {
-    Serial.println("Starting LoRa failed!");
+    println("Starting LoRa failed!");
     delay(1000u);
   }
 
-  Serial.println("LoRa Initializing OK!");
+  println("LoRa Initializing OK!");
 
   previousMillis = millis();
 
+#ifdef WITH_BUZZER
   pinMode(BUZZER_PLUS, OUTPUT);
   pinMode(BUZZER_GND, OUTPUT);
   pinMode(BUZZER_IS_CONNECTED, INPUT);
+#endif
 
   // sleep
   delay(1000);
 }
 
+String generate_msg_to_send(struct gnss_data* data) {
+  String to_send = "";
+  if (data->utc.length() > 0) {
+    to_send += "utc: " + data->utc + ", ";
+  }
+  to_send += "sats: " + String(data->sats) + ", ";
+  to_send += "lat/lon: " + String(data->lat, 10) + "," + String(data->lon, 10);
+  return to_send;
+}
+
 void send_lora_message() {
   String to_send = "";
-  if (last_data.utc.length() > 0) {
-    to_send += "utc: " + last_data.utc + ", ";
+  if (last_data.sats < MINIMUM_SATS_TO_SEND_LAST_GOOD &&
+      last_good_data.sats > MINIMUM_SATS_TO_SEND_LAST_GOOD) {
+    println("sats less then minimum, send saved good data")
+    to_send += generate_msg_to_send(&last_good_data);
   }
-  to_send += "sats: " + String(last_data.sats) + ", ";
-  to_send += "lat/lon: " + String(last_data.lat, 10) + "," + String(last_data.lon, 10);
+  to_send += "\n";
+  to_send += generate_msg_to_send(&last_data);
+
+  LoRa.idle();
 
   LoRa.beginPacket();
   LoRa.print(to_send);
   LoRa.endPacket();
 
-  Serial.println(to_send);
+  LoRa.sleep();
+
+  println(to_send);
+}
+
+void save_nmea_message(String sentence) {
+  sentence.trim();
+
+  // Parse the sentence
+  if (!nmeaParser.parseSentence(sentence)) {
+    println("can`t parce sentence");
+    return;
+  }
+
+  // Handle GGA data
+  if (nmeaParser.isGGAParsed()) {
+    GGAData gga = nmeaParser.getGGAData();
+    last_data.utc = convert_utc_time(gga.utcTime);
+    last_data.lat = gga.latitude;
+    last_data.lon = gga.longitude;
+  }
+
+  // Handle GSV data
+  if (nmeaParser.isGSVParsed()) {
+    GSVData gsv = nmeaParser.getGSVData();
+    last_data.sats = gsv.satellitesInView;
+  }
+
+  // Save for future if satellits enough
+  if (last_data.sats >= MINIMUM_SATS_TO_SEND_LAST_GOOD) {
+    last_good_data.sats = last_data.sats;
+    last_good_data.utc = last_data.utc;
+    last_good_data.lat = last_data.lat;
+    last_good_data.lon = last_data.lon;
+  }
 }
 
 void smart_delay() {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval_millis) {
-    previousMillis = currentMillis;
+  unsigned long time_to_sleep = currentMillis - previousMillis;
+  if (time_to_sleep >= DELAY_TO_SEND) {
     send_lora_message();
+    previousMillis = currentMillis;
   }
 }
 
@@ -100,10 +171,12 @@ inline String convert_utc_time(String ggaSentence) {
 
 void loop() {
   while (Serial1.available()) {
+#ifdef WITH_BUZZER
     int is_buzzer_connected = digitalRead(BUZZER_IS_CONNECTED);
     // turn on buzzer
-    // digitalWrite(BUZZER_PLUS, !is_buzzer_connected);
-    // digitalWrite(BUZZER_GND, 0);
+    digitalWrite(BUZZER_PLUS, !is_buzzer_connected);
+    digitalWrite(BUZZER_GND, 0);
+#endif
 
     char c = Serial1.read();
     if (c != '\n' && c != '\r') {
@@ -112,7 +185,7 @@ void loop() {
       }
       else {
         // Buffer overflow, reset
-        Serial.println("Buffer Overflow. Resetting buffer.");
+        println("Buffer Overflow. Resetting buffer.");
         bufferIndex = 0;
       }
       continue;
@@ -124,27 +197,7 @@ void loop() {
     inputBuffer[bufferIndex] = '\0';
     String sentence = String(inputBuffer);
     bufferIndex = 0;
-    sentence.trim();
-
-    // Parse the sentence
-    if (!nmeaParser.parseSentence(sentence)) {
-      continue;
-    }
-
-    // Handle GGA data
-    if (nmeaParser.isGGAParsed()) {
-      GGAData gga = nmeaParser.getGGAData();
-      last_data.utc = convert_utc_time(gga.utcTime);
-      last_data.lat = gga.latitude;
-      last_data.lon = gga.longitude;
-    }
-
-    // Handle GSV data
-    if (nmeaParser.isGSVParsed()) {
-      GSVData gsv = nmeaParser.getGSVData();
-      last_data.sats = gsv.satellitesInView;
-    }
+    save_nmea_message(sentence);
   }
   smart_delay();
-  delay(2000);
 }
