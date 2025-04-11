@@ -4,10 +4,10 @@
 
 // Config
 // #define WITH_BUZZER
-// #define WITH_SERIAL_LOGS
+#define WITH_SERIAL_LOGS
 
 #define MINIMUM_SATS_TO_SEND_LAST_GOOD 24
-#define DELAY_TO_SEND 2000u
+#define DELAY_TO_SEND 200u
 
 // LoRa pins
 #define SCK     10
@@ -29,7 +29,7 @@
 #endif
 
 #ifdef WITH_SERIAL_LOGS
-  #define println(str) Serial.println("tx: " + str)
+  #define println(str) Serial.println(String("tx: ") + str)
 #else
   #define println(str)
 #endif
@@ -73,6 +73,7 @@ void setup() {
 
   // Initialize LoRa
   LoRa.setPins(SS, RST, DIO0);
+  LoRa.setPreambleLength(8);
 
   while (!LoRa.begin(433E6)) {
     println("Starting LoRa failed!");
@@ -107,19 +108,19 @@ void send_lora_message() {
   String to_send = "";
   if (last_data.sats < MINIMUM_SATS_TO_SEND_LAST_GOOD &&
       last_good_data.sats > MINIMUM_SATS_TO_SEND_LAST_GOOD) {
-    println("sats less then minimum, send saved good data")
+    println("sats less then minimum, send saved good data");
     to_send += generate_msg_to_send(&last_good_data);
+    to_send += "\n";
   }
-  to_send += "\n";
   to_send += generate_msg_to_send(&last_data);
 
-  LoRa.idle();
+  // LoRa.idle();
 
   LoRa.beginPacket();
   LoRa.print(to_send);
   LoRa.endPacket();
 
-  LoRa.sleep();
+  // LoRa.sleep();
 
   println(to_send);
 }
@@ -129,7 +130,6 @@ void save_nmea_message(String sentence) {
 
   // Parse the sentence
   if (!nmeaParser.parseSentence(sentence)) {
-    println("can`t parce sentence");
     return;
   }
 
